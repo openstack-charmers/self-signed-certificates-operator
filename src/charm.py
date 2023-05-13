@@ -9,7 +9,7 @@ import secrets
 import string
 from typing import Optional
 
-from charms.tls_certificates_interface.v2.tls_certificates import (
+from charms.tls_certificates_interface.v2.tls_certificates import (  # type: ignore[import]
     CertificateCreationRequestEvent,
     TLSCertificatesProvidesV2,
     generate_ca,
