@@ -16,16 +16,8 @@ jobs:
       - name: Setup operator environment
         uses: charmed-kubernetes/actions-operator@main
         with:
-          juju-channel: 2.9/stable
+          juju-channel: 3.1/stable
           provider: microk8s
-          channel: 1.26/stable
-          microk8s-addons: "storage dns rbac community"
-      - name: Enable Multus addon
-        continue-on-error: true
-        run: |
-          sudo microk8s enable multus
-          sudo microk8s kubectl -n kube-system rollout status daemonset/kube-multus-ds
-          sudo microk8s kubectl auth can-i create network-attachment-definitions
       - name: Run integration tests
         run: tox -e integration
       - name: Archive Tested Charm
@@ -33,7 +25,7 @@ jobs:
         if: ${{ github.ref_name == 'main' }}
         with:
           name: tested-charm
-          path: .tox/**/sdcore-upf_ubuntu-22.04-amd64.charm
+          path: .tox/**/self-signed-certificates_ubuntu-22.04-amd64.charm
           retention-days: 5
       - name: Archive charmcraft logs
         if: failure()
