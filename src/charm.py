@@ -1,103 +1,176 @@
 #!/usr/bin/env python3
-# Copyright 2023 guillaume
+# Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
-#
-# Learn more at: https://juju.is/docs/sdk
 
-"""Charm the service.
-
-Refer to the following post for a quick-start guide that will help you
-develop a new k8s charm using the Operator Framework:
-
-https://discourse.charmhub.io/t/4208
-"""
+"""Self Signed X.509 Certificates."""
 
 import logging
+import secrets
+import string
+from typing import Optional
 
-import ops
+from charms.tls_certificates_interface.v2.tls_certificates import (
+    CertificateCreationRequestEvent,
+    TLSCertificatesProvidesV2,
+    generate_ca,
+    generate_certificate,
+    generate_private_key,
+)
+from ops.charm import CharmBase, ConfigChangedEvent
+from ops.main import main
+from ops.model import ActiveStatus, BlockedStatus, SecretNotFoundError, WaitingStatus
 
-# Log messages can be retrieved using juju debug-log
 logger = logging.getLogger(__name__)
 
-VALID_LOG_LEVELS = ["info", "debug", "warning", "error", "critical"]
+
+CA_CERTIFICATES_SECRET_LABEL = "ca-certificates"
 
 
-class SelfSignedCertificatesOperatorCharm(ops.CharmBase):
-    """Charm the service."""
+class SelfSignedCertificatesCharm(CharmBase):
+    """Main class to handle Juju events."""
 
     def __init__(self, *args):
+        """Observes config change and certificate request events."""
         super().__init__(*args)
-        self.framework.observe(self.on.httpbin_pebble_ready, self._on_httpbin_pebble_ready)
+        self.tls_certificates = TLSCertificatesProvidesV2(self, "certificates")
         self.framework.observe(self.on.config_changed, self._on_config_changed)
-
-    def _on_httpbin_pebble_ready(self, event: ops.PebbleReadyEvent):
-        """Define and start a workload using the Pebble API.
-
-        Change this example to suit your needs. You'll need to specify the right entrypoint and
-        environment configuration for your specific workload.
-
-        Learn more about interacting with Pebble at at https://juju.is/docs/sdk/pebble.
-        """
-        # Get a reference the container attribute on the PebbleReadyEvent
-        container = event.workload
-        # Add initial Pebble config layer using the Pebble API
-        container.add_layer("httpbin", self._pebble_layer, combine=True)
-        # Make Pebble reevaluate its plan, ensuring any services are started if enabled.
-        container.replan()
-        # Learn more about statuses in the SDK docs:
-        # https://juju.is/docs/sdk/constructs#heading--statuses
-        self.unit.status = ops.ActiveStatus()
-
-    def _on_config_changed(self, event: ops.ConfigChangedEvent):
-        """Handle changed configuration.
-
-        Change this example to suit your needs. If you don't need to handle config, you can remove
-        this method.
-
-        Learn more about config at https://juju.is/docs/sdk/config
-        """
-        # Fetch the new config value
-        log_level = self.model.config["log-level"].lower()
-
-        # Do some validation of the configuration option
-        if log_level in VALID_LOG_LEVELS:
-            # The config is good, so update the configuration of the workload
-            container = self.unit.get_container("httpbin")
-            # Verify that we can connect to the Pebble API in the workload container
-            if container.can_connect():
-                # Push an updated layer with the new config
-                container.add_layer("httpbin", self._pebble_layer, combine=True)
-                container.replan()
-
-                logger.debug("Log level for gunicorn changed to '%s'", log_level)
-                self.unit.status = ops.ActiveStatus()
-            else:
-                # We were unable to connect to the Pebble API, so we defer this event
-                event.defer()
-                self.unit.status = ops.WaitingStatus("waiting for Pebble API")
-        else:
-            # In this case, the config option is bad, so block the charm and notify the operator.
-            self.unit.status = ops.BlockedStatus("invalid log level: '{log_level}'")
+        self.framework.observe(
+            self.tls_certificates.on.certificate_creation_request,
+            self._on_certificate_creation_request,
+        )
 
     @property
-    def _pebble_layer(self):
-        """Return a dictionary representing a Pebble layer."""
-        return {
-            "summary": "httpbin layer",
-            "description": "pebble config layer for httpbin",
-            "services": {
-                "httpbin": {
-                    "override": "replace",
-                    "summary": "httpbin",
-                    "command": "gunicorn -b 0.0.0.0:80 httpbin:app -k gevent",
-                    "startup": "enabled",
-                    "environment": {
-                        "GUNICORN_CMD_ARGS": f"--log-level {self.model.config['log-level']}"
-                    },
-                }
+    def _config_certificate_validity(self) -> int:
+        """Returns certificate validity (in days).
+
+        Returns:
+            int: Certificate validity (in days)
+        """
+        return int(self.model.config.get("certificate-validity", 365))
+
+    @property
+    def _config_ca_common_name(self) -> Optional[str]:
+        """Returns the user provided common name.
+
+         This common name should only be used when the 'generate-self-signed-certificates' config
+         is set to True.
+
+        Returns:
+            str: Common name
+        """
+        return self.model.config.get("ca-common-name", None)
+
+    @property
+    def _root_certificate_is_stored(self) -> bool:
+        """Returns whether self-signed certificate is stored Juju secret.
+
+        Returns:
+            bool: Whether certificates are stored..
+        """
+        try:
+            self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
+            return True
+        except SecretNotFoundError:
+            return False
+
+    def _generate_root_certificate(self) -> None:
+        """Generates root certificate to be used to sign certificates."""
+        if not self._config_ca_common_name:
+            raise ValueError("CA common name should not be empty")
+        private_key_password = generate_password()
+        private_key = generate_private_key(password=private_key_password.encode())
+        ca_certificate = generate_ca(
+            private_key=private_key,
+            subject=self._config_ca_common_name,
+            private_key_password=private_key_password.encode(),
+        )
+        self.app.add_secret(
+            content={
+                "private-key-password": private_key_password,
+                "private-key": private_key.decode(),
+                "ca-certificate": ca_certificate.decode(),
             },
-        }
+            label=CA_CERTIFICATES_SECRET_LABEL,
+        )
+        logger.info("Root certificates generated and stored.")
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        """Triggered when the Juju config is changed.
+
+        Args:
+            event (ConfigChangedEvent): Juju event.
+        """
+        if not self.unit.is_leader():
+            return
+        if invalid_configs := self._invalid_configs():
+            self.unit.status = BlockedStatus(
+                f"The following configuration values are not valid: {invalid_configs}"
+            )
+            return
+        self._generate_root_certificate()
+        self.tls_certificates.revoke_all_certificates()
+        logger.info("Revoked all previously issued certificates.")
+        self.unit.status = ActiveStatus()
+
+    def _invalid_configs(self) -> list[str]:
+        """Returns list of invalid configurations.
+
+        Returns:
+            list: List of invalid config keys.
+        """
+        invalid_configs = []
+        if not self._config_ca_common_name:
+            invalid_configs.append("ca-common-name")
+        if not self._config_certificate_validity:
+            invalid_configs.append("certificate-validity")
+        return invalid_configs
+
+    def _on_certificate_creation_request(self, event: CertificateCreationRequestEvent) -> None:
+        """Handler for certificate requests.
+
+        Args:
+            event: CertificateCreationRequestEvent
+        """
+        if not self.unit.is_leader():
+            return
+        if invalid_configs := self._invalid_configs():
+            self.unit.status = BlockedStatus(
+                f"The following configuration values are not valid: {invalid_configs}"
+            )
+            event.defer()
+            return
+        if not self._root_certificate_is_stored:
+            self.unit.status = WaitingStatus("Root Certificates is not yet generated")
+            event.defer()
+            return
+        ca_certificate_secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
+        ca_certificate_secret_content = ca_certificate_secret.get_content()
+        certificate = generate_certificate(
+            ca=ca_certificate_secret_content["ca-certificate"].encode(),
+            ca_key=ca_certificate_secret_content["private-key"].encode(),
+            ca_key_password=ca_certificate_secret_content["private-key-password"].encode(),
+            csr=event.certificate_signing_request.encode(),
+            validity=self._config_certificate_validity,
+        ).decode()
+        self.tls_certificates.set_relation_certificate(
+            certificate_signing_request=event.certificate_signing_request,
+            certificate=certificate,
+            ca=ca_certificate_secret_content["ca-certificate"],
+            chain=[ca_certificate_secret_content["ca-certificate"], certificate],
+            relation_id=event.relation_id,
+        )
+        logger.info(f"Generated certificate for relation {event.relation_id}")
 
 
-if __name__ == "__main__":  # pragma: nocover
-    ops.main(SelfSignedCertificatesOperatorCharm)
+def generate_password() -> str:
+    """Generates a random 12 character password.
+
+    Returns:
+        str: Password
+    """
+    chars = string.ascii_letters + string.digits
+    return "".join(secrets.choice(chars) for _ in range(12))
+
+
+if __name__ == "__main__":
+    main(SelfSignedCertificatesCharm)

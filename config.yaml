@@ -1,14 +1,12 @@
-# This file defines charm config options, and populates the Configure tab on Charmhub.
-# If your charm does not require configuration options, delete this file entirely.
-#
-# See https://juju.is/docs/config for guidance.
+# Copyright 2023 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 options:
-  # An example config option to customise the log level of the workload
-  log-level:
-    description: |
-      Configures the log level of gunicorn. 
-
-      Acceptable values are: "info", "debug", "warning", "error" and "critical"
-    default: "info"
+  ca-common-name:
     type: string
+    default: ubuntu.com
+    description: Common name to be used by the Certificate Authority.
+  certificate-validity:
+    type: int
+    default: 365
+    description: Certificate validity (in days).

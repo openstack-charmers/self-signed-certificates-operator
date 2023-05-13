@@ -1,43 +1,22 @@
-# This file populates the Overview on Charmhub.
-# See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
+# Copyright 2023 Canonical Ltd.
+# See LICENSE file for licensing details.
 
-# The charm package name, no spaces (required)
-# See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
-name: self-signed-certificates-operator
- 
-# The following metadata are human-readable and will be published prominently on Charmhub.
+name: self-signed-certificates
 
-# (Recommended)
-display-name: Charm Template
+display-name: Self Signed X.509 Certificates
 
-# (Required)
-summary: A very short one-line summary of the charm.
+summary: An operator to provide self-signed X.509 certificates to your charms.
 
 description: |
-  A single sentence that says what the charm is, concisely and memorably.
+  An operator to provide self-signed X.509 certificates to your charms.
 
-  A paragraph of one to three short sentences, that describe what the charm does.
+  This charm relies on the `tls-certificates` charm relation interface. When a requirer charm 
+  inserts a Certificate Signing Request in its unit databag, the 
+  `self-signed-certificates-operator` will read it, generate a self-signed X.509 certificates and
+  inserts this certificate back into the relation data.
+  
+  This charm is useful when developing charms or when deploying charms in non-production environment.
 
-  A third paragraph that explains what need the charm meets.
-
-  Finally, a paragraph that describes whom the charm is useful for.
-
-# The containers and resources metadata apply to Kubernetes charms only.
-# Remove them if not required.
-
-# Your workload’s containers.
-containers:
-  httpbin:
-    resource: httpbin-image
-
-# This field populates the Resources tab on Charmhub.
-resources:
-  # An OCI image resource for each container listed above.
-  # You may remove this if your charm will run without a workload sidecar container.
-  httpbin-image:
-    type: oci-image
-    description: OCI image for httpbin
-    # The upstream-source field is ignored by Juju. It is included here as a reference
-    # so the integration testing suite knows which image to deploy during testing. This field
-    # is also used by the 'canonical/charming-actions' Github action for automated releasing.
-    upstream-source: kennethreitz/httpbin
+provides:
+  certificates:
+    interface: tls-certificates
