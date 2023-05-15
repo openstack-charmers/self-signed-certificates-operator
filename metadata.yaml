@@ -20,3 +20,6 @@ description: |
 provides:
   certificates:
     interface: tls-certificates
+
+assumes:
+  - juju >= 3.1
