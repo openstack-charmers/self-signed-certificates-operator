@@ -45,7 +45,7 @@ class TestCharm(unittest.TestCase):
         ca_certificate_bytes = ca_certificate_string.encode()
         private_key_bytes = private_key_string.encode()
         patch_generate_ca.return_value = ca_certificate_bytes
-        patch_generate_password.return_value = private_key_password
+        patch_generate_password.return_value = private_key_password.encode()
         patch_generate_private_key.return_value = private_key_bytes
         key_values = {"ca-common-name": "pizza.com", "certificate-validity": 100}
         self.harness.set_leader(is_leader=True)
@@ -79,7 +79,7 @@ class TestCharm(unittest.TestCase):
         patch_revoke_all_certificates,
     ):
         patch_generate_ca.return_value = b"whatever CA certificate"
-        patch_generate_password.return_value = "password"
+        patch_generate_password.return_value = b"password"
         patch_generate_private_key.return_value = b"whatever private key"
         key_values = {"ca-common-name": "pizza.com", "certificate-validity": 100}
         self.harness.set_leader(is_leader=True)
@@ -98,7 +98,7 @@ class TestCharm(unittest.TestCase):
         patch_generate_private_key,
     ):
         patch_generate_ca.return_value = b"whatever CA certificate"
-        patch_generate_password.return_value = "password"
+        patch_generate_password.return_value = b"password"
         patch_generate_private_key.return_value = b"whatever private key"
         key_values = {"ca-common-name": "pizza.com", "certificate-validity": 100}
         self.harness.set_leader(is_leader=True)
