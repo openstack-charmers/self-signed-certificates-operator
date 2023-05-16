@@ -4,7 +4,7 @@
 options:
   ca-common-name:
     type: string
-    default: ubuntu.com
+    default: self-signed-certificates-operator
     description: Common name to be used by the Certificate Authority.
   certificate-validity:
     type: int
