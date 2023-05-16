@@ -168,8 +168,7 @@ def generate_password() -> str:
     Returns:
         str: Password
     """
-    chars = string.ascii_letters + string.digits
-    return "".join(secrets.choice(chars) for _ in range(12))
+    return secrets.token_bytes(12)
 
 
 if __name__ == "__main__":
