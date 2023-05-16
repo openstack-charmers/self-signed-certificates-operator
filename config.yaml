@@ -1,0 +1,12 @@
+# Copyright 2023 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+options:
+  ca-common-name:
+    type: string
+    default: self-signed-certificates-operator
+    description: Common name to be used by the Certificate Authority.
+  certificate-validity:
+    type: int
+    default: 365
+    description: Certificate validity (in days).
