@@ -77,15 +77,15 @@ class SelfSignedCertificatesCharm(CharmBase):
         if not self._config_ca_common_name:
             raise ValueError("CA common name should not be empty")
         private_key_password = generate_password()
-        private_key = generate_private_key(password=private_key_password)
+        private_key = generate_private_key(password=private_key_password.encode())
         ca_certificate = generate_ca(
             private_key=private_key,
             subject=self._config_ca_common_name,
-            private_key_password=private_key_password,
+            private_key_password=private_key_password.encode(),
         )
         self.app.add_secret(
             content={
-                "private-key-password": private_key_password.decode(),
+                "private-key-password": private_key_password,
                 "private-key": private_key.decode(),
                 "ca-certificate": ca_certificate.decode(),
             },
@@ -161,13 +161,13 @@ class SelfSignedCertificatesCharm(CharmBase):
         logger.info(f"Generated certificate for relation {event.relation_id}")
 
 
-def generate_password() -> bytes:
-    """Generates a random byte string containing 64 bytes.
+def generate_password() -> str:
+    """Generates a random string containing 64 bytes.
 
     Returns:
         str: Password
     """
-    return secrets.token_bytes(64)
+    return secrets.token_hex(64)
 
 
 if __name__ == "__main__":
