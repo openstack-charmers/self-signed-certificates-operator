@@ -1,9 +1,15 @@
-name: Push
+name: Main
 
 on:
   push:
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
+  check-libraries:
+    uses: ./.github/workflows/check-libraries.yaml
+    secrets: inherit
+
   lint-report:
     uses: ./.github/workflows/lint-report.yaml
 
