@@ -18,13 +18,14 @@ This charm is useful when developing charms or when deploying charms in non-prod
 To use the `self-signed-certificates` operator and provide certificates to your charm, your charm
 needs to support the `tls-certificates` interface.
 
-```console
+```shell
 juju deploy self-signed-certificates
 juju deploy <your charm>
 juju relate self-signed-certificates <your charm>
 ```
 
 ## Get the certificates issued by the charm
-```bash
+
+```shell
 juju run self-signed-certificates/leader get-issued-certificates
 ```
