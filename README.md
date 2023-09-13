@@ -30,6 +30,11 @@ To obtain the CA certificate from this charm, your charm needs to support the
 ```console
 juju relate self-signed-certificates:send-ca-cert <your charm>
 ```
+To get the CA certificate run:
+
+```console
+juju run self-signed-certificates/0 get-ca-certificate
+```
 
 ## Get the certificates issued by the charm
 

@@ -44,6 +44,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             self._on_certificate_creation_request,
         )
         self.framework.observe(self.on.secret_expired, self._configure_ca)
+        self.framework.observe(self.on.get_ca_certificate_action, self._on_get_ca_certificate)
         self.framework.observe(
             self.on.get_issued_certificates_action, self._on_get_issued_certificates
         )
@@ -184,7 +185,7 @@ class SelfSignedCertificatesCharm(CharmBase):
         """Handler for certificate requests.
 
         Args:
-            event (CertificateCreationRequestEvent): Jujue event
+            event (CertificateCreationRequestEvent): Juju event
         """
         if not self.unit.is_leader():
             return
@@ -195,7 +196,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             event.defer()
             return
         if not self._root_certificate_is_stored:
-            self.unit.status = WaitingStatus("Root Certificates is not yet generated")
+            self.unit.status = WaitingStatus("Root Certificate is not yet generated")
             event.defer()
             return
         ca_certificate_secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
@@ -215,6 +216,19 @@ class SelfSignedCertificatesCharm(CharmBase):
             relation_id=event.relation_id,
         )
         logger.info(f"Generated certificate for relation {event.relation_id}")
+
+    def _on_get_ca_certificate(self, event: ActionEvent):
+        """Handler for the get-ca-certificate action.
+
+        Args:
+            event (ActionEvent): Juju event
+        """
+        if not self._root_certificate_is_stored:
+            event.fail("Root Certificate is not yet generated")
+            return
+        ca_certificate_secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
+        ca_certificate_secret_content = ca_certificate_secret.get_content()
+        event.set_results({"ca-certificate": ca_certificate_secret_content["ca-certificate"]})
 
     def _on_send_ca_cert_relation_joined(self, event: RelationJoinedEvent):
         self._send_ca_cert(rel_id=event.relation.id)
