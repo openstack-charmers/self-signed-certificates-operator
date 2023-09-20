@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pytest_operator.plugin import OpsTest
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ TLS_REQUIRER_CHARM_NAME = "tls-certificates-requirer"
 
 @pytest.fixture(scope="module")
 @pytest.mark.abort_on_fail
-async def build_and_deploy(ops_test):
+async def build_and_deploy(ops_test: OpsTest):
     """Build the charm-under-test and deploy it."""
     charm = await ops_test.build_charm(".")
     await ops_test.model.deploy(
@@ -37,7 +38,7 @@ async def build_and_deploy(ops_test):
 
 @pytest.mark.abort_on_fail
 async def test_given_charm_is_built_when_deployed_then_status_is_active(
-    ops_test,
+    ops_test: OpsTest,
     build_and_deploy,
 ):
     await ops_test.model.wait_for_idle(
@@ -48,7 +49,7 @@ async def test_given_charm_is_built_when_deployed_then_status_is_active(
 
 
 async def test_given_tls_requirer_is_deployed_and_related_then_certificate_is_created_and_passed_correctly(  # noqa: E501
-    ops_test,
+    ops_test: OpsTest,
     build_and_deploy,
 ):
     await ops_test.model.add_relation(
@@ -64,6 +65,16 @@ async def test_given_tls_requirer_is_deployed_and_related_then_certificate_is_cr
     assert action_output["ca-certificate"] is not None
     assert action_output["chain"] is not None
     assert action_output["csr"] is not None
+
+
+async def test_given_charm_scaled_then_charm_does_not_crash(
+    ops_test: OpsTest,
+    build_and_deploy,
+):
+    await ops_test.model.applications[APP_NAME].scale(2)
+    await ops_test.model.wait_for_idle(apps=[APP_NAME], timeout=1000, wait_for_exact_units=2)
+    await ops_test.model.applications[APP_NAME].scale(1)
+    await ops_test.model.wait_for_idle(apps=[APP_NAME], timeout=1000, wait_for_exact_units=1)
 
 
 async def run_get_certificate_action(ops_test) -> dict:
