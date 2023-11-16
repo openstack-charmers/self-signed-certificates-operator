@@ -20,15 +20,26 @@ from charms.tls_certificates_interface.v2.tls_certificates import (  # type: ign
     generate_certificate,
     generate_private_key,
 )
+from cryptography import x509
 from ops.charm import ActionEvent, CharmBase, EventBase, RelationJoinedEvent
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, SecretNotFoundError, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, SecretNotFoundError
 
 logger = logging.getLogger(__name__)
 
 
 CA_CERTIFICATES_SECRET_LABEL = "ca-certificates"
 SEND_CA_CERT_REL_NAME = "send-ca-cert"  # Must match metadata
+
+
+def certificate_has_common_name(certificate: bytes, common_name: str) -> bool:
+    """Returns whether the certificate has the given common name."""
+    loaded_certificate = x509.load_pem_x509_certificate(certificate)
+    certificate_common_name = loaded_certificate.subject.get_attributes_for_oid(
+        x509.oid.NameOID.COMMON_NAME
+    )[0].value
+
+    return certificate_common_name == common_name
 
 
 class SelfSignedCertificatesCharm(CharmBase):
@@ -38,12 +49,13 @@ class SelfSignedCertificatesCharm(CharmBase):
         """Observes config change and certificate request events."""
         super().__init__(*args)
         self.tls_certificates = TLSCertificatesProvidesV2(self, "certificates")
-        self.framework.observe(self.on.config_changed, self._configure_ca)
+        self.framework.observe(self.on.update_status, self._configure)
+        self.framework.observe(self.on.config_changed, self._configure)
+        self.framework.observe(self.on.secret_expired, self._configure)
         self.framework.observe(
             self.tls_certificates.on.certificate_creation_request,
             self._on_certificate_creation_request,
         )
-        self.framework.observe(self.on.secret_expired, self._configure_ca)
         self.framework.observe(self.on.get_ca_certificate_action, self._on_get_ca_certificate)
         self.framework.observe(
             self.on.get_issued_certificates_action, self._on_get_issued_certificates
@@ -145,7 +157,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             )
         logger.info("Root certificates generated and stored.")
 
-    def _configure_ca(self, event: EventBase) -> None:
+    def _configure(self, event: EventBase) -> None:
         """Validates configuration and generates root certificate.
 
         It will revoke the certificates signed by the previous root certificate.
@@ -160,11 +172,32 @@ class SelfSignedCertificatesCharm(CharmBase):
                 f"The following configuration values are not valid: {invalid_configs}"
             )
             return
-        self._generate_root_certificate()
-        self.tls_certificates.revoke_all_certificates()
-        logger.info("Revoked all previously issued certificates.")
+        if not self._root_certificate_is_stored or not self._root_certificate_matches_config():
+            self._generate_root_certificate()
+            self.tls_certificates.revoke_all_certificates()
+            logger.info("Revoked all previously issued certificates.")
         self._send_ca_cert()
+        self._process_outstanding_certificate_requests()
         self.unit.status = ActiveStatus()
+
+    def _root_certificate_matches_config(self) -> bool:
+        """Returns whether the stored root certificate matches with the config."""
+        if not self._config_ca_common_name:
+            raise ValueError("CA common name should not be empty")
+        ca_certificate_secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
+        ca_certificate_secret_content = ca_certificate_secret.get_content()
+        ca = ca_certificate_secret_content["ca-certificate"].encode()
+        return certificate_has_common_name(certificate=ca, common_name=self._config_ca_common_name)
+
+    def _process_outstanding_certificate_requests(self) -> None:
+        """Process outstanding certificate requests."""
+        for relation in self.tls_certificates.get_outstanding_certificate_requests():
+            for request in relation["unit_csrs"]:
+                self._generate_self_signed_certificate(
+                    csr=request["certificate_signing_request"],
+                    is_ca=request["is_ca"],
+                    relation_id=relation["relation_id"],
+                )
 
     def _invalid_configs(self) -> list[str]:
         """Returns list of invalid configurations.
@@ -189,34 +222,46 @@ class SelfSignedCertificatesCharm(CharmBase):
         """
         if not self.unit.is_leader():
             return
-        if invalid_configs := self._invalid_configs():
-            self.unit.status = BlockedStatus(
-                f"The following configuration values are not valid: {invalid_configs}"
-            )
-            event.defer()
+        if self._invalid_configs():
+            logger.warning("Invalid configuration. Certificate cannot be generated.")
             return
         if not self._root_certificate_is_stored:
-            self.unit.status = WaitingStatus("Root Certificate is not yet generated")
-            event.defer()
+            logger.warning(
+                "Root certificate is not yet generated. Certificate cannot be generated."
+            )
             return
+        self._generate_self_signed_certificate(
+            csr=event.certificate_signing_request,
+            is_ca=event.is_ca,
+            relation_id=event.relation_id,
+        )
+
+    def _generate_self_signed_certificate(self, csr: str, is_ca: bool, relation_id: int) -> None:
+        """Generates self-signed certificate.
+
+        Args:
+            csr (str): Certificate signing request
+            is_ca (bool): Whether the certificate is a CA
+            relation_id (int): Relation id
+        """
         ca_certificate_secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
         ca_certificate_secret_content = ca_certificate_secret.get_content()
         certificate = generate_certificate(
             ca=ca_certificate_secret_content["ca-certificate"].encode(),
             ca_key=ca_certificate_secret_content["private-key"].encode(),
             ca_key_password=ca_certificate_secret_content["private-key-password"].encode(),
-            csr=event.certificate_signing_request.encode(),
+            csr=csr.encode(),
             validity=self._config_certificate_validity,
-            is_ca=event.is_ca,
+            is_ca=is_ca,
         ).decode()
         self.tls_certificates.set_relation_certificate(
-            certificate_signing_request=event.certificate_signing_request,
+            certificate_signing_request=csr,
             certificate=certificate,
             ca=ca_certificate_secret_content["ca-certificate"],
             chain=[ca_certificate_secret_content["ca-certificate"], certificate],
-            relation_id=event.relation_id,
+            relation_id=relation_id,
         )
-        logger.info(f"Generated certificate for relation {event.relation_id}")
+        logger.info("Generated certificate for relation %s", relation_id)
 
     def _on_get_ca_certificate(self, event: ActionEvent):
         """Handler for the get-ca-certificate action.
