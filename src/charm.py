@@ -23,7 +23,7 @@ from charms.tls_certificates_interface.v4.tls_certificates import (
     generate_certificate,
     generate_private_key,
 )
-from ops.charm import ActionEvent, CharmBase, CollectStatusEvent, RelationJoinedEvent
+from ops.charm import ActionEvent, CharmBase, CollectStatusEvent
 from ops.framework import EventBase
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, SecretNotFoundError
@@ -66,7 +66,7 @@ class SelfSignedCertificatesCharm(CharmBase):
         )
         self.framework.observe(
             self.on[SEND_CA_CERT_REL_NAME].relation_joined,
-            self._on_send_ca_cert_relation_joined,
+            self._configure,
         )
 
     def _on_collect_unit_status(self, event: CollectStatusEvent):
@@ -297,28 +297,23 @@ class SelfSignedCertificatesCharm(CharmBase):
         ca_certificate_secret_content = ca_certificate_secret.get_content(refresh=True)
         event.set_results({"ca-certificate": ca_certificate_secret_content["ca-certificate"]})
 
-    def _on_send_ca_cert_relation_joined(self, event: RelationJoinedEvent):
-        self._send_ca_cert(rel_id=event.relation.id)
-
     def _send_ca_cert(self, *, rel_id=None):
         """There is one (and only one) CA cert that we need to forward to multiple apps.
 
         Args:
             rel_id: Relation id. If not given, update all relations.
         """
+        if not self._root_certificate_is_stored:
+            return
         send_ca_cert = CertificateTransferProvides(self, SEND_CA_CERT_REL_NAME)
-        if self._root_certificate_is_stored:
-            secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
-            secret_content = secret.get_content(refresh=True)
-            ca = secret_content["ca-certificate"]
-            if rel_id:
-                send_ca_cert.set_certificate("", ca, [], relation_id=rel_id)
-            else:
-                for relation in self.model.relations.get(SEND_CA_CERT_REL_NAME, []):
-                    send_ca_cert.set_certificate("", ca, [], relation_id=relation.id)
+        secret = self.model.get_secret(label=CA_CERTIFICATES_SECRET_LABEL)
+        secret_content = secret.get_content(refresh=True)
+        ca = secret_content["ca-certificate"]
+        if rel_id:
+            send_ca_cert.set_certificate("", ca, [], relation_id=rel_id)
         else:
             for relation in self.model.relations.get(SEND_CA_CERT_REL_NAME, []):
-                send_ca_cert.remove_certificate(relation.id)
+                send_ca_cert.set_certificate("", ca, [], relation_id=relation.id)
 
     def _push_ca_cert_to_container(self, ca_certificate: str):
         """Store the CA certificate in the charm container.
