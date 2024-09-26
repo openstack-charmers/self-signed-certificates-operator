@@ -74,6 +74,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             self.on[SEND_CA_CERT_REL_NAME].relation_joined,
             self._configure,
         )
+        self.framework.observe(self.on.rotate_private_key_action, self._on_rotate_private_key)
 
     def _on_collect_unit_status(self, event: CollectStatusEvent):
         """Centralized status management for the charm."""
@@ -157,6 +158,29 @@ class SelfSignedCertificatesCharm(CharmBase):
         results = {"certificates": [certificate.to_json() for certificate in certificates]}
         event.set_results(results)
 
+    def _on_rotate_private_key(self, event: ActionEvent):
+        """Handle the rotate-private-key action.
+
+        Creates a new private key and a new CA certificate and revokes all issued certificates.
+
+        Args:
+            event (ActionEvent): Juju event
+        """
+        if not self.unit.is_leader():
+            event.fail("This action can only be run on the leader unit.")
+            return
+        self.tls_certificates.revoke_all_certificates()
+        logger.info("Revoked all previously issued certificates.")
+        self._clean_up_juju_secret(EXPIRING_CA_CERTIFICATES_SECRET_LABEL)
+        if not self._generate_root_certificate():
+            event.fail(
+                "Private key rotation failed due to missing configuration.\
+                Please check your configuration and try again.\
+                Certificates have been revoked."
+            )
+            return
+        event.set_results({"result": "New private key and CA certificate generated and stored."})
+
     def _parse_config_time_string(self, time_str: str) -> timedelta:
         """Parse a given time string.
 
@@ -223,12 +247,15 @@ class SelfSignedCertificatesCharm(CharmBase):
         except SecretNotFoundError:
             return False
 
-    def _generate_root_certificate(self) -> None:
+    def _generate_root_certificate(self) -> bool:
         """Generate root certificate to be used to sign certificates.
 
         Stores the root certificate in a juju secret.
         If the secret is already created, we simply update its content, else we create a
         new secret.
+
+        Returns:
+            bool: Whether the root certificate was generated and stored successfully.
         """
         if (
             not self._config_ca_common_name
@@ -237,7 +264,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             or not self._ca_certificate_renewal_threshold
         ):
             logger.warning("Missing configuration for root CA certificate")
-            return
+            return False
         private_key = generate_private_key()
         ca_certificate = generate_ca(
             private_key=private_key,
@@ -261,6 +288,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             expire=self._ca_certificate_renewal_threshold,
         )
         logger.info("Root certificates generated and stored.")
+        return True
 
     def _configure(self, _: EventBase) -> None:
         """Validate configuration and generates root certificate.
@@ -276,9 +304,9 @@ class SelfSignedCertificatesCharm(CharmBase):
             return
         if not self._root_certificate_is_stored or not self._root_certificate_matches_config():
             self.tls_certificates.revoke_all_certificates()
+            logger.info("Revoked all previously issued certificates.")
             self._clean_up_juju_secret(EXPIRING_CA_CERTIFICATES_SECRET_LABEL)
             self._generate_root_certificate()
-            logger.info("Revoked all previously issued certificates.")
             return
         if not self._is_ca_cert_active():
             logger.info("Renewing CA certificate")
@@ -376,6 +404,7 @@ class SelfSignedCertificatesCharm(CharmBase):
             expiring_ca_secret = self.model.get_secret(label=label)
             expiring_ca_secret.remove_all_revisions()
         except SecretNotFoundError:
+            logger.info("Secret %s not found, skipping clean up", label)
             return
         return
 
