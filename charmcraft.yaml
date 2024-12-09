@@ -1,11 +1,14 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-name: self-signed-certificates
+name: sunbeam-ssc
 
-summary: An operator to provide self-signed X.509 certificates to your charms.
+summary: Sunbeam fork of an operator to provide self-signed X.509 certificates to your charms.
 
 description: |
+  This is a fork used by Sunbeam to get a 24.04 version, please use:
+  https://charmhub.io/self-signed-certificates
+
   An operator to provide self-signed X.509 certificates to your charms.
 
   This charm relies on the `tls-certificates` charm relation interface. When a requirer charm
@@ -17,37 +20,17 @@ description: |
 links:
   documentation: https://discourse.charmhub.io/t/self-signed-x-509-certificates-documentation/11591
   website:
-    - https://charmhub.io/self-signed-certificates
+    - https://charmhub.io/sunbeam-ssc
   source:
-    - https://github.com/canonical/self-signed-certificates-operator
-  issues:
-    - https://github.com/canonical/self-signed-certificates-operator/issues
+    - https://github.com/openstack-charmers/self-signed-certificates-operator
 
 assumes:
   - juju >= 3.1
 
 type: charm
-bases:
-  - build-on:
-    - name: ubuntu
-      channel: "22.04"
-      architectures:
-        - amd64
-    run-on:
-    - name: ubuntu
-      channel: "22.04"
-      architectures:
-        - amd64
-  - build-on:
-    - name: ubuntu
-      channel: "22.04"
-      architectures:
-        - arm64
-    run-on:
-    - name: ubuntu
-      channel: "22.04"
-      architectures:
-        - arm64
+base: ubuntu@24.04
+platforms:
+  amd64:
 
 parts:
   charm:
